@@ -32,6 +32,8 @@ Jetson AGX Orin 64GB 두 대를 **PCIe Gen4 x8**로 직접 연결하고, **Tenso
 
 ## 빠른 시작
 
+> 처음 실행한다면 **[INSTRUCTION.md](INSTRUCTION.md)**(모니터, Wi-Fi, 케이블 연결부터 실험 실행까지 단계별 가이드)를 먼저 보세요.
+
 ### 0) 하드웨어와 OS (최초 1회) → [docs/01_hardware_and_flash.md](docs/01_hardware_and_flash.md)
 1. 두 보드에 **JetPack 6.2.3 (L4T R36.5)**을 설치합니다.
 2. **Board B만** EP 모드로 재플래시합니다: `setup/flash/flash_ep.sh`
