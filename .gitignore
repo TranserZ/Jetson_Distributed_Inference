@@ -1,0 +1,9 @@
+.state/
+config/local.env
+analysis/out/
+__pycache__/
+*.pyc
+*.ko
+*.o
+*.mod*
+.*.cmd
