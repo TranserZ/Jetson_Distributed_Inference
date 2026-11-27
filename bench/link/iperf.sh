@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Raw link throughput/latency between the boards over an IP path (eth10g | vnet).
+# Raw link throughput/latency between the boards over the PCIe VNET IP path.
 #   bench/link/iperf.sh <transport> <outdir>      (run on Board A)
 source "$(dirname "${BASH_SOURCE[0]}")/../../lib/common.sh"
 source "${JDI_ROOT}/lib/transport.sh"

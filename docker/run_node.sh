@@ -6,7 +6,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 source "${JDI_ROOT}/lib/transport.sh"
 
-tr="${1:?usage: $0 <single|eth10g|vnet|dma>|stop}"
+tr="${1:?usage: $0 <single|vnet|dma>|stop}"
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 [[ $tr == stop ]] && { ok "container stopped"; exit 0; }
 

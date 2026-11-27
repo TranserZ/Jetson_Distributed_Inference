@@ -8,7 +8,7 @@
 import argparse, csv, glob, json, os, statistics
 from collections import defaultdict
 
-ORDER = ["single", "eth10g", "vnet", "dma", "dmatest"]
+ORDER = ["single", "vnet", "dma", "dmatest"]
 
 
 def runs(root, all_runs):

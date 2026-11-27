@@ -3,9 +3,9 @@
 # Control traffic (Ray, vLLM scheduler->worker messages, torch store, gloo,
 # NCCL bootstrap in Exp 2) ALWAYS stays on the 10GbE control interface,
 # so only the data path differs between experiments.
+# 10GbE is control-plane only; it is never used as an NCCL data path.
 #
 #   single : 1 board, TP=1 (no inter-node traffic)
-#   eth10g : NCCL Socket transport over 10GbE            (Exp 0 baseline)
 #   vnet   : NCCL Socket transport over Tegra VNET (PCIe) (Exp 1)
 #   dma    : NCCL net plugin over PCIe eDMA               (Exp 2c, not implemented yet)
 
@@ -25,10 +25,9 @@ transport_docker_env() {
   )
   case "$tr" in
     single) dif="$cif" ;;
-    eth10g) dif="$cif";  e+=(-e "NCCL_NET=Socket") ;;
     vnet)   dif=$(vnet_if); e+=(-e "NCCL_NET=Socket") ;;
     dma)    die "transport 'dma' (Exp 2c) is not implemented yet — see docs/03_direct_dma_plan.md" ;;
-    *)      die "unknown transport '$tr' (single|eth10g|vnet|dma)" ;;
+    *)      die "unknown transport '$tr' (single|vnet|dma)" ;;
   esac
   e+=(-e "NCCL_SOCKET_IFNAME=${dif}")
   printf '%q ' "${e[@]}"
@@ -37,7 +36,7 @@ transport_docker_env() {
 # the data-path IP of the RP (used for logging/iperf)
 transport_peer_ips() {   # -> "<rp_ip> <ep_ip>"
   case "$1" in
-    eth10g|single) echo "$RP_CTRL_IP $EP_CTRL_IP" ;;
+    single)        echo "$RP_CTRL_IP $EP_CTRL_IP" ;;
     vnet)          echo "$RP_VNET_IP $EP_VNET_IP" ;;
     *)             die "no IP path for transport $1" ;;
   esac

@@ -1,10 +1,10 @@
 # Jetson Distributed Inference over PCIe
 
-Jetson AGX Orin 64GB 두 대를 **PCIe Gen4 x8**로 직접 연결하고, **Tensor Parallelism(TP=2)** 분산추론에서 보드 간 통신 경로를 바꿔 가며 성능을 비교하는 실험 레포입니다.
+Jetson AGX Orin 64GB 두 대를 **PCIe Gen4 x8**로 직접 연결하고, **Tensor Parallelism(TP=2)** 분산추론에서 PCIe 위의 두 통신 방식, **VNET(가상 Ethernet)**과 **Direct DMA**를 비교하는 실험 레포입니다.
 
 | 실험 | 데이터 경로 (all-reduce) | 상태 |
 |---|---|---|
-| **Exp 0** 기준선 | 단일 보드(TP=1) / 10GbE + NCCL Socket | ✅ 실행 가능 |
+| **Exp 0** 참고값 | 단일 보드(TP=1), 보드 간 통신 없음 | ✅ 실행 가능 |
 | **Exp 1** | PCIe + **Tegra VNET**(가상 Ethernet) + NCCL Socket | ✅ 실행 가능 |
 | **Exp 2a** | PCIe **eDMA** 하드웨어 대역폭 (NVIDIA 테스트 드라이버) | ✅ 실행 가능 |
 | **Exp 2b/2c** | PCIe **Direct DMA** 커널 드라이버 + NCCL net plugin → 분산추론 | 🚧 Phase 2 ([설계](docs/03_direct_dma_plan.md)) |
@@ -23,7 +23,8 @@ Jetson AGX Orin 64GB 두 대를 **PCIe Gen4 x8**로 직접 연결하고, **Tenso
    VNET   192.168.2.2 ══════ Exp 1 데이터 (PCIe 위 TCP/IP) ══════════ 192.168.2.1
    eDMA   C5 RP      ═══════ Exp 2 데이터 (PCIe DMA) ═══════════════ C5 EP
 ```
-- 실험마다 바뀌는 것은 **NCCL all-reduce가 지나는 경로뿐**입니다. `lib/transport.sh`가 transport별로 `NCCL_SOCKET_IFNAME`, `NCCL_NET` 등을 설정합니다.
+- 10GbE는 **제어 전용**입니다(Ray, SSH, NCCL bootstrap). all-reduce 데이터는 절대 10GbE로 보내지 않습니다.
+- 실험마다 바뀌는 것은 **NCCL all-reduce가 지나는 PCIe 경로(VNET 또는 DMA)뿐**입니다. `lib/transport.sh`가 transport별로 `NCCL_SOCKET_IFNAME`, `NCCL_NET` 등을 설정합니다.
 - 모델, 코드, 컨테이너, 클럭(MAXN + `jetson_clocks`), 측정 스크립트는 모든 실험에서 같습니다.
 - 각 실행의 NCCL 로그(`NET/Socket : Using <iface>`)를 저장해서 실제로 어느 경로를 썼는지 확인할 수 있게 합니다.
 
@@ -35,7 +36,7 @@ Jetson AGX Orin 64GB 두 대를 **PCIe Gen4 x8**로 직접 연결하고, **Tenso
 1. 두 보드에 **JetPack 6.2.3 (L4T R36.5)**을 설치합니다.
 2. **Board B만** EP 모드로 재플래시합니다: `setup/flash/flash_ep.sh`
 3. 케이블을 연결합니다: **Board A 슬롯 ← R33L ← K88VS → Board B 슬롯**. 그리고 **R33L 전원 점퍼 JP1–JP5를 분리(2–3)**로 설정합니다.
-4. 10GbE 랜선을 연결합니다.
+4. 10GbE 랜선을 연결합니다 (제어 경로 전용).
 
 ### 1) 두 보드 공통
 ```bash
@@ -57,7 +58,7 @@ experiments/check.sh             # 사전 점검 체크리스트
 
 ### 3) 실험 (Board A에서 실행, B는 SSH로 자동 제어)
 ```bash
-experiments/exp0_baseline.sh            # 단일 보드 + 10GbE TP=2
+experiments/exp0_baseline.sh            # 참고값: 단일 보드 TP=1
 experiments/exp1_vnet.sh                # PCIe VNET (자동으로 bringup vnet)
 experiments/exp2_dma.sh 2a              # PCIe eDMA 하드웨어 대역폭
 python3 analysis/report.py              # → analysis/out/summary.md, *.png, *.csv
@@ -102,15 +103,15 @@ docs/                   ← 하드웨어·플래시, DMA 테스트, Phase 2 설�
 
 | 계층 | 도구 | 지표 | 비교 대상 |
 |---|---|---|---|
-| 링크 | iperf3 / eDMA test | Gbps, 손실률, ping RTT | 10GbE vs VNET vs eDMA |
-| 통신 | `allreduce_bench.py` | 크기별 지연(us), busbw(GB/s) | 10GbE vs VNET (vs DMA plugin) |
-| ViT-B/16, ViT-H/14 | `vit_tp.py` | img/s, 지연, **통신 시간 비중**, batch 1–64 | 단일 vs 10GbE vs VNET |
-| GPT-OSS-20B | `vllm bench serve` | TTFT, TPOT, ITL, 출력 tok/s, 입력 128–2048, 동시 요청 1–8 | 단일 vs 10GbE vs VNET, TP vs TP+EP |
+| 링크 | iperf3 / eDMA test | Gbps, 손실률, ping RTT | VNET vs eDMA |
+| 통신 | `allreduce_bench.py` | 크기별 지연(us), busbw(GB/s) | VNET vs DMA plugin (Phase 2) |
+| ViT-B/16, ViT-H/14 | `vit_tp.py` | img/s, 지연, **통신 시간 비중**, batch 1–64 | VNET vs DMA (단일 보드는 참고값) |
+| GPT-OSS-20B | `vllm bench serve` | TTFT, TPOT, ITL, 출력 tok/s, 입력 128–2048, 동시 요청 1–8 | VNET vs DMA (단일 보드는 참고값), TP vs TP+EP |
 
 **예상 결과(검증 대상)**
 - LLM 토큰 생성(decode)은 all-reduce 1회가 약 6 KB로 작아서 **지연에 민감**합니다.
 - ViT의 큰 batch와 LLM prefill은 1회가 수 MB에서 수십 MB라 **대역폭에 민감**합니다.
-- 따라서 경로에 따른 차이는 후자에서 크게 나타날 것으로 예상합니다.
+- 따라서 VNET과 DMA의 차이는 후자에서 크게 나타날 것으로 예상합니다.
 
 ## 참고
 - NVIDIA Jetson Linux r36.5 — *PCIe Endpoint Mode* (ODMDATA, `pci-epf-tegra-vnet`, `pci-epf-dma-test`)

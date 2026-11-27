@@ -81,7 +81,7 @@ on_ep_sudo() {
 
 # ---------------------------------------------------------------- results ---
 new_result_dir() {   # new_result_dir <experiment> <transport>
-  local d="${JDI_ROOT}/results/$1/$2/$(date +%Y%m%d-%H%M%S)"
+  local d; d="${JDI_ROOT}/results/$1/$2/$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$d/logs"
   echo "$d"
 }

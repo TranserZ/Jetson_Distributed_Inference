@@ -48,7 +48,7 @@ PCIe Gen4 x8
   - transport 이름은 `dma` (`lib/transport.sh`)
 - **검증 순서**
   1. `bench/allreduce_bench.py`로 정확성(correct=OK)을 확인합니다.
-  2. 크기별 busbw를 VNET, 10GbE와 비교합니다.
+  2. 크기별 busbw를 VNET과 비교합니다.
   3. ViT와 vLLM을 실행합니다.
 
 ## 리스크

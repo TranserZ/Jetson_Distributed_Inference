@@ -7,7 +7,7 @@
 | Jetson AGX Orin 64GB Devkit ×2 | Board A, Board B | A = Root Port(RP), B = Endpoint(EP) |
 | ADT-Link **R33L** | PCIe x16 male→female **Tx-Rx SWAP** board | TX/RX 교차, 측대역 신호 버퍼 |
 | ADT-Link **K88VS** (20 cm) | PCIe 4.0 x8 goldfinger↔goldfinger, **Tx→Tx 직결** | 보드 간 연장 |
-| 10GbE 랜선 (또는 스위치) | Devkit RJ45 | 제어 경로 + 기준선 |
+| 10GbE 랜선 (또는 스위치) | Devkit RJ45 | 제어 경로 전용 (Ray, SSH, NCCL bootstrap) |
 
 > ⚠️ **K88NS를 쓰면 안 됩니다.** K88NS도 Tx↔Rx를 교차하므로 R33L과 합쳐 두 번 교차하게 되고, 결과적으로 교차가 없는 상태가 됩니다. 교차는 R33L에서 **정확히 한 번**만 일어나야 합니다.
 
