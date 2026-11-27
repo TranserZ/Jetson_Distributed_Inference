@@ -1,0 +1,14 @@
+[
+  {"id": "math_mul",   "prompt": "What is 17 * 23? Answer with just the number.", "expect": ["391"]},
+  {"id": "math_pow",   "prompt": "What is 2 to the power of 10? Answer with just the number.", "expect": ["1024"]},
+  {"id": "math_sqrt",  "prompt": "What is the square root of 144? Answer with just the number.", "expect": ["12"]},
+  {"id": "capital_fr", "prompt": "What is the capital of France? Answer in one word.", "expect": ["Paris"]},
+  {"id": "capital_kr", "prompt": "What is the capital of South Korea? Answer in one word.", "expect": ["Seoul"]},
+  {"id": "gold",       "prompt": "What is the chemical symbol for gold? Answer with just the symbol.", "expect": ["Au"]},
+  {"id": "planet",     "prompt": "What is the largest planet in our solar system? Answer in one word.", "expect": ["Jupiter"]},
+  {"id": "leap",       "prompt": "How many days are in a leap year? Answer with just the number.", "expect": ["366"]},
+  {"id": "boil",       "prompt": "At sea level, what is the boiling point of water in degrees Celsius? Answer with just the number.", "expect": ["100"]},
+  {"id": "author",     "prompt": "Who wrote the play 'Romeo and Juliet'? Answer with the author's last name.", "expect": ["Shakespeare"]},
+  {"id": "free_haiku", "prompt": "Write a haiku about the ocean.", "expect": null},
+  {"id": "free_tp",    "prompt": "Explain tensor parallelism in two sentences.", "expect": null}
+]

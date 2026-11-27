@@ -32,7 +32,12 @@ fi
 
 log "vllm serve $LLM_MODEL ${args[*]}"
 echo "vllm serve $LLM_MODEL ${args[*]}" > "$out/serve_cmd.txt"
-docker exec -d "$CONTAINER_NAME" bash -c "vllm serve $LLM_MODEL $(printf '%q ' "${args[@]}") > $(CPATH "$out")/logs/vllm_server.log 2>&1"
+# Profiler is armed but idle until /start_profile (only the profiling pass at the end uses it).
+# Ray copies VLLM_* env vars to the worker on Board B; its traces land in B's copy of this dir.
+PROF="$out/profile"
+penv=()
+[[ ${LLM_PROFILE:-1} == 1 ]] && penv=(-e "VLLM_TORCH_PROFILER_DIR=$(CPATH "$PROF")" -e VLLM_TORCH_PROFILER_WITH_STACK=0)
+docker exec -d "${penv[@]}" "$CONTAINER_NAME" bash -c "vllm serve $LLM_MODEL $(printf '%q ' "${args[@]}") > $(CPATH "$out")/logs/vllm_server.log 2>&1"
 
 log "waiting for server (first start compiles kernels; can take >10 min)"
 t0=$(date +%s)
@@ -64,4 +69,41 @@ for in_len in $LLM_INPUT_LENS; do
     done
   done
 done
+# ---- correctness: fixed prompts, greedy -----------------------------------
+if [[ ${LLM_CORRECTNESS:-1} == 1 ]]; then
+  log "correctness check (greedy, bench/data/llm_prompts.json)"
+  CX python3 /jdi/bench/llm_correctness.py --model "$LLM_MODEL" --max-tokens "${LLM_CORRECTNESS_MAX_TOKENS:-512}" \
+    --out "$(CPATH "$out")/correctness.json" > "$out/logs/correctness.log" 2>&1 || warn "correctness check failed"
+  tail -n 1 "$out/logs/correctness.log" | sed 's/^/    /' || true
+fi
+
+# ---- communication share: torch-profiler traces ---------------------------
+# per input length: out=1 (prefill only) and out=$LLM_OUTPUT_LEN (prefill+decode);
+# analysis/trace_comm.py derives decode share from the difference.
+collect_traces() {   # move fresh top-level traces into $PROF/<tag>/ on both boards
+  local mv; mv="cd $(CPATH "$PROF") 2>/dev/null && mkdir -p $1 && find . -maxdepth 1 -type f -name '*.json*' -exec mv {} $1/ \;"
+  CX bash -c "$mv" || true
+  [[ $tr != single ]] && ep_ssh "docker exec $CONTAINER_NAME bash -c $(printf '%q' "$mv")" || true
+}
+if [[ ${LLM_PROFILE:-1} == 1 ]]; then
+  for in_len in ${LLM_PROFILE_INPUT_LENS:-$LLM_INPUT_LENS}; do
+    for olen in 1 "$LLM_OUTPUT_LEN"; do
+      tag="in${in_len}_out${olen}"
+      log "profile $tag"
+      CX vllm bench serve --backend vllm --base-url http://127.0.0.1:8000 \
+        --model "$LLM_MODEL" --dataset-name random \
+        --random-input-len "$in_len" --random-output-len "$olen" --ignore-eos \
+        --num-prompts "${LLM_PROFILE_PROMPTS:-2}" --max-concurrency 1 --profile \
+        > "$out/logs/profile_${tag}.log" 2>&1 || warn "profile failed: $tag"
+      sleep 5   # traces are exported asynchronously by some versions
+      collect_traces "$tag"
+    done
+  done
+  if [[ $tr != single ]]; then   # bring Board B's (rank 1) traces next to ours
+    rel="${PROF#"$JDI_ROOT"/}"
+    scp -rq -o BatchMode=yes "${EP_SSH_USER}@${EP_CTRL_IP}:${EP_REPO_DIR}/${rel}" "$out/profile_ep" \
+      || warn "could not copy Board B traces"
+  fi
+  python3 "${JDI_ROOT}/analysis/trace_comm.py" "$PROF"/in*_out"$LLM_OUTPUT_LEN" 2>/dev/null | grep comm_fraction | sed 's/^/    [all inputs, rank0] /' || true
+fi
 ok "LLM benchmark done -> $out"

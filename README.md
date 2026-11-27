@@ -89,27 +89,62 @@ bench/                  ← 측정 도구 (모든 실험 공유)
   link/dma_test.sh      NVIDIA eDMA 테스트 실행 + dmesg 파싱
   allreduce_bench.py    8 B ~ 256 MiB all-reduce 지연과 busbw, 정확성 검증
   vit_tp.py             ViT Megatron-TP (layer당 all-reduce 2회), 통신 시간 분해, --verify
-  llm_vllm.sh           Ray + vllm serve + `vllm bench serve` sweep (TP / TP+EP)
+  llm_vllm.sh           Ray + vllm serve + `vllm bench serve` sweep (TP / TP+EP) + 프로파일 + 정확성
+  llm_correctness.py    고정 질문 greedy 생성 → 정답률, TP=1과 일치 여부
+  data/llm_prompts.json 정확성 검사용 질문
 experiments/            ← 실험 진입점
   check.sh, exp0_baseline.sh, exp1_vnet.sh, exp2_dma.sh, run.sh(공통 러너)
 kernel/pcie_dma/        ← [Phase 2] Direct DMA 커널 모듈
 nccl-plugin/pciedma/    ← [Phase 2] NCCL net plugin (ncclNet_v10)
 results/<exp>/<transport>/<timestamp>/   ← 원본 로그 + JSON + meta.json (자동 생성)
 analysis/report.py      ← 표, 그래프 생성
+analysis/trace_comm.py  ← profiler trace → NCCL 통신 시간 비중
 docs/                   ← 하드웨어·플래시, DMA 테스트, Phase 2 설계, 트러블슈팅
 ```
 
 ## 측정 항목
 
-| 계층 | 도구 | 지표 | 비교 대상 |
+비교 대상은 **PCIe VNET**과 **PCIe eDMA**입니다. 단일 보드(TP=1)는 참고값으로만 씁니다.
+eDMA는 현재 ① 링크만 측정합니다(Exp 2a). ②~④는 Phase 2에서 DMA plugin이 완성된 뒤 측정합니다.
+
+### ① 링크 대역폭·지연: PCIe 선 자체가 얼마나 빠른가
+| 경로 | 도구 | 방법 |
+|---|---|---|
+| VNET | `iperf3`, `ping` | 가상 이더넷 위로 TCP/UDP 데이터를 최대한 보내 Gbps를 잽니다. ping으로 왕복 시간을 잽니다. |
+| eDMA | NVIDIA eDMA 테스트 드라이버 | DMA 엔진으로 16 MB 블록을 반복 전송해 Gbps를 잽니다. |
+- 지표: 대역폭, 지연
+- 목적: 각 방식의 물리적 상한 파악
+
+### ② all-reduce: 분산추론에서 쓰는 기본 통신 연산의 비용
+- 방법: all-reduce 한 번만 따로 실행합니다. 크기를 8 B부터 256 MiB까지 2배씩 바꿔 가며 반복합니다 (`bench/allreduce_bench.py`).
+- 지표: 크기별 지연(µs), 대역폭(busbw, GB/s), 정확성(합산 결과 검증)
+
+### ③ ViT: 메시지가 큰 경우 (대역폭에 민감)
+| 모델 | 1회 추론당 all-reduce 횟수 | 1회당 크기 (batch 1 → 64) |
+|---|---|---|
+| ViT-B/16 | 24 | 약 0.3 MB → 19 MB |
+| ViT-H/14 | 64 | 약 0.66 MB → 42 MB |
+- 방법: 이미지 분류 추론, batch 1, 4, 8, 16, 32, 64 (`bench/vit_tp.py`)
+- 지표: 처리량(img/s), 지연(평균, p50, p90), 통신 시간 비중, 정확성(단일 보드 결과와 비교)
+
+### ④ GPT-OSS-20B: 큰 메시지(prefill)와 작은 메시지(decode)가 섞인 경우
+| 단계 | all-reduce 1회 크기 | 무엇에 민감한가 | 지표 |
 |---|---|---|---|
-| 링크 | iperf3 / eDMA test | Gbps, 손실률, ping RTT | VNET vs eDMA |
-| 통신 | `allreduce_bench.py` | 크기별 지연(us), busbw(GB/s) | VNET vs DMA plugin (Phase 2) |
-| ViT-B/16, ViT-H/14 | `vit_tp.py` | img/s, 지연, **통신 시간 비중**, batch 1–64 | VNET vs DMA (단일 보드는 참고값) |
-| GPT-OSS-20B | `vllm bench serve` | TTFT, TPOT, ITL, 출력 tok/s, 입력 128–2048, 동시 요청 1–8 | VNET vs DMA (단일 보드는 참고값), TP vs TP+EP |
+| prefill (입력 처리) | 수 MB (2048 토큰이면 약 12 MB) | 대역폭 | TTFT, prefill tok/s |
+| decode (토큰 생성) | 약 6 KB × 동시 요청 수, 토큰 하나당 48회 | 지연 | TPOT/ITL, decode tok/s |
+- 방법: vLLM 서버에 요청을 보냅니다 (`bench/llm_vllm.sh`). TP와 TP+EP를 모두 측정합니다.
+  - 입력 길이: 128, 256, 512, 1024, 2048, 4096, 8192
+  - 동시 요청 수: 1, 4, 8
+  - 출력 길이: 128
+- 지표
+  - **prefill 처리량** = 입력 토큰 수 / TTFT
+  - **decode 처리량** = 요청당 1 / TPOT, 전체 출력 tok/s
+  - **요청 하나의 전체 지연** (E2E)
+  - **통신 시간 비중**: torch profiler로 GPU 커널 시간 중 NCCL 커널 시간의 비율을 잽니다. 입력 길이마다 출력 1토큰(prefill만)과 출력 128토큰을 한 번씩 프로파일하고, 둘의 차이로 decode 비중을 구합니다 (`analysis/trace_comm.py`).
+  - **정확성**: 고정 질문 12개를 greedy로 생성합니다. 정답이 있는 질문은 정답률을, 나머지는 단일 보드 결과와 같은지를 봅니다 (`bench/llm_correctness.py`).
 
 **예상 결과(검증 대상)**
-- LLM 토큰 생성(decode)은 all-reduce 1회가 약 6 KB로 작아서 **지연에 민감**합니다.
+- decode는 all-reduce 1회가 약 6 KB로 작아서 **지연에 민감**합니다.
 - ViT의 큰 batch와 LLM prefill은 1회가 수 MB에서 수십 MB라 **대역폭에 민감**합니다.
 - 따라서 VNET과 DMA의 차이는 후자에서 크게 나타날 것으로 예상합니다.
 
